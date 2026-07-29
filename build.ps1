@@ -55,7 +55,15 @@ Write-Host "[OK] Build concluido." -ForegroundColor Green
 
 if ($Install -and (Test-Path $apkPath)) {
     Write-Host "[2/2] Instalando via ADB..." -ForegroundColor Yellow
-    adb install -r $apkPath 2>&1
+    $adb = Get-Command "adb.exe" -ErrorAction SilentlyContinue
+    if (-not $adb) {
+        $adbPath = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
+        $altPath = "$env:APPDATA\..\Local\Android\Sdk\platform-tools\adb.exe"
+        if (Test-Path $adbPath) { $adb = $adbPath }
+        elseif (Test-Path $altPath) { $adb = $altPath }
+        else { $adb = "adb" }
+    }
+    & $adb install -r $apkPath 2>&1
     if ($?) {
         Write-Host "[OK] Instalado!" -ForegroundColor Green
     } else {
