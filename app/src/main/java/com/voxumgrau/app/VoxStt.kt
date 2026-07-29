@@ -1,6 +1,10 @@
 package com.voxumgrau.app
 
+import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -10,8 +14,10 @@ import java.util.Locale
 class VoxStt(private val onResult: (String) -> Unit, private val onError: (String) -> Unit) {
 
     private var recognizer: SpeechRecognizer? = null
+    private var audioManager: AudioManager? = null
+    private var focusRequest: AudioFocusRequest? = null
 
-    fun start(context: android.content.Context) {
+    fun start(context: Context) {
         if (recognizer == null) {
             recognizer = SpeechRecognizer.createSpeechRecognizer(context)
             recognizer?.setRecognitionListener(object : RecognitionListener {
@@ -26,9 +32,11 @@ class VoxStt(private val onResult: (String) -> Unit, private val onError: (Strin
                         SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Nada ouvido"
                         else -> "Erro de áudio: $error"
                     }
+                    abandonarFoco()
                     onError(msg)
                 }
                 override fun onResults(results: Bundle?) {
+                    abandonarFoco()
                     val texts = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     if (!texts.isNullOrEmpty()) {
                         onResult(texts[0])
@@ -41,6 +49,16 @@ class VoxStt(private val onResult: (String) -> Unit, private val onError: (Strin
             })
         }
 
+        audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val attrs = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+            .build()
+        focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+            .setAudioAttributes(attrs)
+            .build()
+        audioManager?.requestAudioFocus(focusRequest!!)
+
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale("pt", "BR"))
@@ -51,11 +69,21 @@ class VoxStt(private val onResult: (String) -> Unit, private val onError: (Strin
         recognizer?.startListening(intent)
     }
 
+    private fun abandonarFoco() {
+        try {
+            if (audioManager != null && focusRequest != null) {
+                audioManager?.abandonAudioFocusRequest(focusRequest!!)
+            }
+        } catch (_: Exception) {}
+    }
+
     fun stop() {
+        abandonarFoco()
         recognizer?.stopListening()
     }
 
     fun destroy() {
+        abandonarFoco()
         recognizer?.destroy()
         recognizer = null
     }

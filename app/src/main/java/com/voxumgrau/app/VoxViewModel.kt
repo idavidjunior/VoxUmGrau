@@ -29,7 +29,9 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
     fun initVoz() {
         tts = VoxTts { tentarOuvir() }
         tts?.init(getApplication())
-        audioPlayer = VoxAudioPlayer(onDone = { tentarOuvir() })
+        audioPlayer = VoxAudioPlayer(onDone = {
+            if (!ouvindo) status = "Pronto para falar"
+        })
     }
 
     fun permissaoConcedida() {
@@ -77,9 +79,9 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
         processando = true
     }
 
-    private val onSttError: (String) -> Unit = {
+    private val onSttError: (String) -> Unit = { msg ->
         ouvindo = false
-        tentarOuvir()
+        status = msg
     }
 
     fun connect(host: String, port: Int = 8765) {
