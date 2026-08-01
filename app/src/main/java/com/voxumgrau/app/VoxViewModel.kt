@@ -56,6 +56,13 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
     private val onMessage: (String) -> Unit = { raw ->
         try {
             val json = JSONObject(raw)
+            if (json.has("corrigido")) {
+                val corr = json.getString("corrigido")
+                val last = mensagens.lastOrNull()
+                if (last != null && last.deUsuario) {
+                    mensagens = mensagens.dropLast(1) + Mensagem(corr, true, last.imagemB64, last.mime)
+                }
+            }
             if (json.has("audio")) {
                 val audioB64 = json.getString("audio")
                 val text = json.optString("text", "")
