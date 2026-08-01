@@ -91,9 +91,33 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun send(text: String) {
+        if (!conectado || ws == null) {
+            status = "Desconectado — toque em Conectar primeiro"
+            return
+        }
+        if (ouvindo) pararOuvir()
         ws?.send(text)
         mensagens = mensagens + Mensagem(text, true)
         textoInput = ""
+        processando = true
+    }
+
+    fun enviarImagem(base64: String, mime: String, texto: String) {
+        if (!conectado || ws == null) {
+            status = "Desconectado — toque em Conectar primeiro"
+            return
+        }
+        if (ouvindo) pararOuvir()
+        val payload = JSONObject().apply {
+            put("tipo", "imagem")
+            put("texto", texto)
+            put("imagem", base64)
+            put("mime", mime)
+        }
+        ws?.send(payload.toString())
+        mensagens = mensagens + Mensagem(texto, true, imagemB64 = base64, mime = mime)
+        textoInput = ""
+        processando = true
     }
 
     fun comecarOuvir(interromper: Boolean = false) {
