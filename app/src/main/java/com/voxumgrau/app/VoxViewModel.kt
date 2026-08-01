@@ -25,6 +25,15 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
     private var stt: VoxStt? = null
     private var ws: VoxWebSocket? = null
     private var audioPlayer: VoxAudioPlayer? = null
+    private var saudacaoLocalFalada = false
+
+    private val saudacoesLocais = listOf(
+        "Opa, chegou!",
+        "Pronto, estou aqui!",
+        "Fala aí!",
+        "O sistema tá ligado!",
+        "Cheguei, pode falar!",
+    )
 
     fun initVoz() {
         tts = VoxTts { tentarOuvir() }
@@ -54,12 +63,16 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
                     mensagens = mensagens + Mensagem(text, false)
                 }
                 processando = false
+                tts?.stop()
+                saudacaoLocalFalada = true
                 if (ouvindo) pararOuvir()
                 audioPlayer?.play(audioB64)
             } else if (json.has("text")) {
                 val text = json.getString("text")
                 mensagens = mensagens + Mensagem(text, false)
                 processando = false
+                tts?.stop()
+                saudacaoLocalFalada = true
             }
         } catch (_: Exception) {
             mensagens = mensagens + Mensagem(raw, false)
@@ -70,6 +83,9 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
     private val onStatus: (String) -> Unit = { s ->
         status = s
         conectado = s == "Conectado" || s == "Online"
+        if (conectado && !saudacaoLocalFalada && !ouvindo) {
+            tts?.speak(saudacoesLocais.random()) {}
+        }
     }
 
     private val onSttResult: (String) -> Unit = { text ->
@@ -86,6 +102,7 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
 
     fun connect(host: String, port: Int = 8765) {
         ws?.disconnect()
+        saudacaoLocalFalada = false
         ws = VoxWebSocket(onMessage, onStatus)
         ws?.connect(host, port)
     }

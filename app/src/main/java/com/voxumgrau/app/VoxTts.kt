@@ -38,10 +38,10 @@ class VoxTts(private val onDone: () -> Unit = {}) : TextToSpeech.OnInitListener 
         tts = TextToSpeech(context, this)
     }
 
-    fun speak(text: String) {
+    fun speak(text: String, done: (() -> Unit)? = null) {
         if (!ready) return
         tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onDone(utteranceId: String?) { onDone() }
+            override fun onDone(utteranceId: String?) { (done ?: onDone)() }
             override fun onError(utteranceId: String?) {}
             override fun onStart(utteranceId: String?) {}
         })
