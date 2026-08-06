@@ -47,7 +47,7 @@ data class Mensagem(val texto: String, val deUsuario: Boolean, val imagemB64: St
 fun VoxChatScreen(viewModel: VoxViewModel = viewModel()) {
 
     var showSettings by remember { mutableStateOf(false) }
-    var host by remember { mutableStateOf("100.91.141.101") }
+    var host by remember { mutableStateOf(viewModel.hostIp) }
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val listState = rememberLazyListState()
 
@@ -114,7 +114,7 @@ fun VoxChatScreen(viewModel: VoxViewModel = viewModel()) {
 
     LaunchedEffect(Unit) {
         viewModel.initVoz()
-        viewModel.connect(host)
+        viewModel.connect(viewModel.hostIp)
     }
 
     LaunchedEffect(viewModel.conectado) {
@@ -153,6 +153,13 @@ fun VoxChatScreen(viewModel: VoxViewModel = viewModel()) {
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(end = 8.dp)
                     )
+                    IconButton(onClick = { viewModel.toggleEco() }) {
+                        Text(
+                            if (viewModel.ecoAtivo) "🔊" else "🔇",
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            fontSize = 20.sp
+                        )
+                    }
                     IconButton(onClick = { showSettings = !showSettings }) {
                         Text("⚙", color = MaterialTheme.colorScheme.onPrimary)
                     }
@@ -172,7 +179,7 @@ fun VoxChatScreen(viewModel: VoxViewModel = viewModel()) {
                         modifier = Modifier.weight(1f)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Button(onClick = { viewModel.connect(host); showSettings = false }) {
+                    Button(onClick = { viewModel.updateHost(host); viewModel.connect(host); showSettings = false }) {
                         Text("Conectar")
                     }
                 }

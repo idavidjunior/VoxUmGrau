@@ -12,8 +12,8 @@ android {
         applicationId = "com.voxumgrau.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 14
-        versionName = "1.0.0"
+        versionCode = 16
+        versionName = "1.1.1"
     }
 
     buildTypes {
@@ -50,6 +50,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }
+
 
 
 
