@@ -44,7 +44,12 @@ class VoxStt(private val onResult: (String) -> Unit, private val onError: (Strin
                         onError("Não entendi")
                     }
                 }
-                override fun onPartialResults(partialResults: Bundle?) {}
+                override fun onPartialResults(partialResults: Bundle?) {
+                    val texts = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    if (!texts.isNullOrEmpty()) {
+                        onResult(texts[0])
+                    }
+                }
                 override fun onEvent(eventType: Int, params: Bundle?) {}
             })
         }

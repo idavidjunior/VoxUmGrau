@@ -145,7 +145,7 @@ fun VoxChatScreen(viewModel: VoxViewModel = viewModel()) {
                 actions = {
                     Text(
                         text = when {
-                            viewModel.processando -> "Processando..."
+                            viewModel.processando -> viewModel.progressoEtapa.ifEmpty { "Processando..." }
                             viewModel.ouvindo -> "Ouvindo..."
                             else -> viewModel.status
                         },
@@ -233,7 +233,7 @@ fun VoxChatScreen(viewModel: VoxViewModel = viewModel()) {
                 if (viewModel.processando) {
                     item {
                         Text(
-                            text = "Jarvis está processando...",
+                            text = if (viewModel.progressoEtapa.isNotEmpty()) "Jarvis ${viewModel.progressoEtapa.lowercase()}..." else "Jarvis está processando...",
                             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 8.dp),
                             textAlign = TextAlign.Start,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,

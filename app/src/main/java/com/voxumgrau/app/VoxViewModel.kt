@@ -28,6 +28,8 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
     var mensagens by mutableStateOf(listOf<Mensagem>())
     var textoInput by mutableStateOf("")
     var processando by mutableStateOf(false)
+    var progressoEtapa by mutableStateOf("")
+        private set
     var ecoAtivo by mutableStateOf(false)
         private set
 
@@ -39,6 +41,7 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
     private var ws: VoxWebSocket? = null
     private var audioPlayer: VoxAudioPlayer? = null
     private var saudacaoLocalFalada = false
+    private var audioStreaming = false
 
     private val saudacoesLocais = listOf(
         "Opa, chegou!",
@@ -111,6 +114,7 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
             mensagens = mensagens + Mensagem(text, true)
             ws?.send(text)
             processando = true
+            progressoEtapa = "Enviando sua mensagem"
             // Modo Eco ativo: volta a ouvir automaticamente após processar
             if (ecoAtivo && conectado && microfonePermitido) {
                 // pequeno delay na main thread (SpeechRecognizer exige main thread)
@@ -128,6 +132,13 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.Main) {
             try {
                 val json = JSONObject(raw)
+                if (json.has("progresso")) {
+                    val etapa = json.getString("progresso")
+                    if (etapa.isNotEmpty()) {
+                        progressoEtapa = etapa
+                    }
+                    return@launch
+                }
                 if (json.has("corrigido")) {
                     val corr = json.getString("corrigido")
                     val last = mensagens.lastOrNull()
@@ -135,18 +146,42 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
                         mensagens = mensagens.dropLast(1) + Mensagem(corr, true, last.imagemB64, last.mime)
                     }
                 }
-                if (json.has("audio")) {
+                if (json.has("audio_streaming")) {
+                    val text = json.optString("text", "")
+                    if (text.isNotEmpty()) {
+                        mensagens = mensagens + Mensagem(text, false)
+                    }
+                    processando = false
+                    progressoEtapa = ""
+                    tts?.stop()
+                    saudacaoLocalFalada = true
+                    if (ouvindo) pararOuvir()
+                    audioStreaming = true
+                    audioPlayer?.startStream()
+                    if (ecoAtivo && conectado && microfonePermitido) {
+                        viewModelScope.launch(Dispatchers.Main) {
+                            delay(1200)
+                            if (ecoAtivo && !ouvindo) comecarOuvir()
+                        }
+                    }
+                } else if (json.has("audio_chunk")) {
+                    val chunk = json.getString("audio_chunk")
+                    audioPlayer?.playChunk(chunk)
+                } else if (json.has("audio_done")) {
+                    audioStreaming = false
+                    audioPlayer?.finishStream()
+                } else if (json.has("audio")) {
                     val audioB64 = json.getString("audio")
                     val text = json.optString("text", "")
                     if (text.isNotEmpty()) {
                         mensagens = mensagens + Mensagem(text, false)
                     }
                     processando = false
+                    progressoEtapa = ""
                     tts?.stop()
                     saudacaoLocalFalada = true
                     if (ouvindo) pararOuvir()
                     audioPlayer?.play(audioB64)
-                    // Modo Eco: volta a ouvir após resposta (na main thread)
                     if (ecoAtivo && conectado && microfonePermitido) {
                         viewModelScope.launch(Dispatchers.Main) {
                             delay(1200)
@@ -157,12 +192,14 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
                     val text = json.getString("text")
                     mensagens = mensagens + Mensagem(text, false)
                     processando = false
+                    progressoEtapa = ""
                     tts?.stop()
                     saudacaoLocalFalada = true
                 }
             } catch (_: Exception) {
                 mensagens = mensagens + Mensagem(raw, false)
                 processando = false
+                progressoEtapa = ""
             }
         }
     }
@@ -199,6 +236,7 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
         mensagens = mensagens + Mensagem(text, true)
         textoInput = ""
         processando = true
+        progressoEtapa = "Enviando sua mensagem"
     }
 
     fun enviarImagem(base64: String, mime: String, texto: String) {
@@ -217,6 +255,7 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
         mensagens = mensagens + Mensagem(texto, true, imagemB64 = base64, mime = mime)
         textoInput = ""
         processando = true
+        progressoEtapa = "Enviando imagem"
     }
 
     fun comecarOuvir(interromper: Boolean = false) {
