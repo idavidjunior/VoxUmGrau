@@ -41,7 +41,8 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
     private var ws: VoxWebSocket? = null
     private var audioPlayer: VoxAudioPlayer? = null
     private var saudacaoLocalFalada = false
-    private var audioStreaming = false
+    var audioStreaming by mutableStateOf(false)
+        private set
 
     private val saudacoesLocais = listOf(
         "Opa, chegou!",
