@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.voxumgrau.app.VoxHealthInfo
 import com.voxumgrau.app.ui.theme.*
 
 // ============================================================
@@ -29,7 +30,8 @@ fun JarvisTopBar(
     ecoAtivo: Boolean,
     onEcoToggle: () -> Unit,
     onSettingsClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    saude: VoxHealthInfo? = null
 ) {
     Box(
         modifier = modifier
@@ -64,7 +66,8 @@ fun JarvisTopBar(
 
                 ConnectionStatusIndicator(
                     connected = connected,
-                    text = statusText
+                    text = statusText,
+                    saude = saude
                 )
             }
 

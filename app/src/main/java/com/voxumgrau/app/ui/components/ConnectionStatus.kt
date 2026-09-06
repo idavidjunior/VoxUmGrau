@@ -7,8 +7,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -17,17 +16,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.voxumgrau.app.VoxHealthInfo
 import com.voxumgrau.app.ui.theme.*
+import kotlinx.coroutines.delay
 
 // ============================================================
-// CONNECTION STATUS — Indicador de conexão
+// CONNECTION STATUS — Indicador de conexão com saude em tempo real
 // ============================================================
 
 @Composable
 fun ConnectionStatusIndicator(
     connected: Boolean,
     text: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    saude: VoxHealthInfo? = null
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "status_pulse")
     val pulseAlpha by infiniteTransition.animateFloat(
@@ -40,28 +42,71 @@ fun ConnectionStatusIndicator(
         label = "pulse"
     )
 
-    Row(
+    var agora by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1000)
+            agora = System.currentTimeMillis()
+        }
+    }
+
+    val det = saude?.let { info ->
+        val segAtras = if (info.ultimaAtividadeMs > 0)
+            ((agora - info.ultimaAtividadeMs) / 1000).toInt().coerceAtLeast(0)
+        else null
+        buildString {
+            if (info.rede.isNotEmpty()) {
+                append(info.rede)
+                append(" · ")
+            }
+            if (info.rotaAtiva.isNotEmpty()) {
+                append(info.rotaAtiva)
+                append(" · ")
+            }
+            if (connected) append("conectado")
+            if (segAtras != null && connected) append(" · atividades ha ${segAtras}s")
+            if (info.ultimaAtividadeMs > 0 && info.falhasHeartbeat > 0) append(" · heartbeat ${info.falhasHeartbeat}/3")
+            if (info.tentativaReconnect > 0 && !connected) append(" · tentativa ${info.tentativaReconnect}")
+        }
+    }
+
+    Column(
         modifier = modifier
             .clip(RoundedCornerShape(20.dp))
             .background(JarvisSurfaceGlass)
             .padding(horizontal = 10.dp, vertical = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
+        horizontalAlignment = Alignment.Start
     ) {
-        Box(
-            modifier = Modifier
-                .size(8.dp)
-                .clip(CircleShape)
-                .alpha(if (connected) pulseAlpha else 0.4f)
-                .background(if (connected) JarvisGreen else JarvisRed)
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .alpha(if (connected) pulseAlpha else 0.4f)
+                    .background(if (connected) JarvisGreen else JarvisRed)
+            )
 
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodySmall,
-            color = if (connected) JarvisGreen else JarvisRed,
-            fontWeight = FontWeight.Medium
-        )
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (connected) JarvisGreen else JarvisRed,
+                fontWeight = FontWeight.Medium
+            )
+        }
+
+        if (det != null && det.isNotBlank()) {
+            Text(
+                text = det,
+                style = MaterialTheme.typography.bodySmall,
+                fontSize = 9.sp,
+                color = JarvisTextMuted,
+                fontWeight = FontWeight.Light,
+                maxLines = 1
+            )
+        }
     }
 }
 

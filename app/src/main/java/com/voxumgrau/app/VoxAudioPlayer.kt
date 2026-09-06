@@ -1,6 +1,8 @@
 package com.voxumgrau.app
 
+import android.media.AudioManager
 import android.media.MediaPlayer
+import android.media.ToneGenerator
 import android.util.Base64
 import android.util.Log
 import java.io.File
@@ -12,6 +14,27 @@ class VoxAudioPlayer(private val onDone: () -> Unit = {}) {
     private var player: MediaPlayer? = null
     private var streaming = false
     private var streamTempFile: File? = null
+
+    /**
+     * Alerta sonoro curto (queda de conexao). Usa ToneGenerator do
+     * sistema, independente do fluxo de audio MP3 da bridge.
+     */
+    fun playAlerta() {
+        try {
+            val tg = ToneGenerator(AudioManager.STREAM_MUSIC, 80)
+            tg.startTone(ToneGenerator.TONE_PROP_ACK, 250)
+            Thread {
+                try {
+                    Thread.sleep(350)
+                } catch (_: InterruptedException) {
+                } finally {
+                    tg.release()
+                }
+            }.start()
+        } catch (e: Exception) {
+            Log.e("VoxAudio", "playAlerta: ${e.message}", e)
+        }
+    }
 
     fun play(base64Audio: String) {
         stop()

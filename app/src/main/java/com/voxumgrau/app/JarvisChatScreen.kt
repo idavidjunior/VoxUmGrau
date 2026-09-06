@@ -5,13 +5,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.net.Uri
-import android.util.Base64
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -20,7 +15,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -35,8 +30,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -44,15 +37,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.voxumgrau.app.ui.components.*
 import com.voxumgrau.app.ui.theme.*
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -60,10 +48,10 @@ import java.util.*
 data class Mensagem(
     val texto: String,
     val deUsuario: Boolean,
-    val imagemB64: String? = null,
-    val mime: String = "image/jpeg",
     val timestamp: String = "",
-    val isAudio: Boolean = false
+    val isAudio: Boolean = false,
+    val imagem: ByteArray? = null,
+    val legenda: String? = null
 )
 
 // ============================================================
@@ -75,11 +63,27 @@ data class Mensagem(
 fun JarvisChatScreen(viewModel: VoxViewModel = viewModel()) {
     val ctx = LocalContext.current
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
 
     var showSettings by remember { mutableStateOf(false) }
     var host by remember { mutableStateOf(viewModel.hostIp) }
-    var fotoUri by remember { mutableStateOf<Uri?>(null) }
+
+    // Estado de edição de mensagem já enviada (padrão edit-and-resubmit)
+    // Quando não-nulo, a mensagem naquele índice é exibida em modo de edição.
+    var editandoIndice by remember { mutableStateOf<Int?>(null) }
+    var editandoTexto by remember { mutableStateOf("") }
+
+    fun cancelarEdicao() {
+        editandoIndice = null
+        editandoTexto = ""
+    }
+
+    fun salvarEdicao() {
+        val idx = editandoIndice ?: return
+        val original = viewModel.mensagens.getOrNull(idx)?.texto ?: ""
+        if (viewModel.editarMensagem(idx, original, editandoTexto)) {
+            cancelarEdicao()
+        }
+    }
 
     // Voice state para o visualizador
     val voiceState = when {
@@ -108,47 +112,6 @@ fun JarvisChatScreen(viewModel: VoxViewModel = viewModel()) {
     ) { granted ->
         if (granted) viewModel.permissaoConcedida()
     }
-
-    // Camera
-    fun novaFotoUri(): Uri {
-        val dir = File(ctx.cacheDir, "fotos").apply { mkdirs() }
-        val file = File(dir, "foto_${System.currentTimeMillis()}.jpg")
-        return FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", file)
-    }
-
-    fun prepararEEnviar(uri: Uri) {
-        scope.launch {
-            val b64 = withContext(Dispatchers.IO) {
-                try {
-                    ctx.contentResolver.openInputStream(uri)?.use { input ->
-                        val bmp = BitmapFactory.decodeStream(input) ?: return@withContext null
-                        val maior = maxOf(bmp.width, bmp.height)
-                        val escala = if (maior > 1280) 1280f / maior else 1f
-                        val w = (bmp.width * escala).toInt()
-                        val h = (bmp.height * escala).toInt()
-                        val scaled = if (escala < 1f) Bitmap.createScaledBitmap(bmp, w, h, true) else bmp
-                        val baos = ByteArrayOutputStream()
-                        scaled.compress(Bitmap.CompressFormat.JPEG, 80, baos)
-                        if (scaled !== bmp) scaled.recycle()
-                        Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
-                    }
-                } catch (_: Exception) { null }
-            }
-            if (b64 != null) {
-                viewModel.enviarImagem(b64, "image/jpeg", viewModel.textoInput)
-            } else {
-                Toast.makeText(ctx, "Não foi possível carregar a imagem", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    val cameraLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.TakePicture()
-    ) { ok -> if (ok) fotoUri?.let { prepararEEnviar(it) } }
-
-    val galeriaLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia()
-    ) { uri -> if (uri != null) prepararEEnviar(uri) }
 
     // Init
     LaunchedEffect(Unit) {
@@ -204,11 +167,12 @@ fun JarvisChatScreen(viewModel: VoxViewModel = viewModel()) {
                     viewModel.processando -> viewModel.progressoEtapa.ifEmpty { "Processando..." }
                     viewModel.ouvindo -> "Ouvindo..."
                     viewModel.conectado -> "Online"
-                    else -> "Desconectado"
+                    else -> viewModel.status
                 },
                 ecoAtivo = viewModel.ecoAtivo,
                 onEcoToggle = { viewModel.toggleEco() },
-                onSettingsClick = { showSettings = !showSettings }
+                onSettingsClick = { showSettings = !showSettings },
+                saude = viewModel.saude
             )
 
             // Settings panel (collapsible)
@@ -239,6 +203,16 @@ fun JarvisChatScreen(viewModel: VoxViewModel = viewModel()) {
                             ),
                             modifier = Modifier.weight(1f)
                         )
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        OutlinedButton(
+                            onClick = { viewModel.testarConexao() },
+                            border = androidx.compose.foundation.BorderStroke(1.dp, JarvisCyan),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = JarvisCyan)
+                        ) {
+                            Text("Testar")
+                        }
 
                         Spacer(modifier = Modifier.width(8.dp))
 
@@ -279,7 +253,7 @@ fun JarvisChatScreen(viewModel: VoxViewModel = viewModel()) {
 
                         Text(
                             text = if (viewModel.conectado)
-                                "Olá, Deivid. Estou pronto."
+                                "Olá, David. Estou pronto."
                             else
                                 "Conectando...",
                             style = MaterialTheme.typography.titleMedium,
@@ -305,43 +279,45 @@ fun JarvisChatScreen(viewModel: VoxViewModel = viewModel()) {
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(vertical = 12.dp)
                     ) {
-                        items(viewModel.mensagens) { msg ->
+                        itemsIndexed(viewModel.mensagens) { indice, msg ->
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .combinedClickable(
-                                        onClick = { copiar(msg.texto) },
-                                        onLongClick = { copiar(msg.texto) }
+                                        onClick = { copiar(if (msg.imagem != null) (msg.legenda ?: msg.texto) else msg.texto) },
+                                        onLongClick = {
+                                            if (msg.deUsuario && editandoIndice == null && !viewModel.processando) {
+                                                editandoIndice = indice
+                                                editandoTexto = msg.texto
+                                            } else {
+                                                copiar(if (msg.imagem != null) (msg.legenda ?: msg.texto) else msg.texto)
+                                            }
+                                        }
                                     )
                             ) {
-                                // Imagem se houver
-                                if (msg.imagemB64 != null) {
-                                    val bmp = remember(msg.imagemB64) {
-                                        try {
-                                            val bytes = Base64.decode(msg.imagemB64, Base64.DEFAULT)
-                                            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                                        } catch (_: Exception) { null }
-                                    }
-                                    bmp?.let {
-                                        Image(
-                                            bitmap = it.asImageBitmap(),
-                                            contentDescription = "Foto enviada",
-                                            modifier = Modifier
-                                                .size(160.dp)
-                                                .padding(horizontal = 12.dp, vertical = 4.dp)
-                                                .clip(RoundedCornerShape(12.dp)),
-                                            contentScale = ContentScale.Crop
-                                        )
-                                    }
-                                }
-
-                                // Bolha de mensagem
-                                if (msg.texto.isNotEmpty()) {
+                                if (editandoIndice == indice) {
+                                    // Balão em modo de edição
+                                    EditMessageBubble(
+                                        texto = editandoTexto,
+                                        onTextoChange = { editandoTexto = it },
+                                        onConfirm = { salvarEdicao() },
+                                        onCancel = { cancelarEdicao() }
+                                    )
+                                } else if (msg.texto.isNotEmpty() || msg.imagem != null) {
+                                    // Bolha de mensagem (texto e/ou imagem)
                                     JarvisMessageBubble(
                                         text = msg.texto,
                                         isUser = msg.deUsuario,
                                         timestamp = msg.timestamp,
-                                        isAudio = msg.isAudio && !msg.deUsuario
+                                        isAudio = msg.isAudio && !msg.deUsuario,
+                                        imagem = msg.imagem,
+                                        legenda = msg.legenda,
+                                        acaoEdicao = if (msg.deUsuario && editandoIndice == null && !viewModel.processando) {
+                                            {
+                                                editandoIndice = indice
+                                                editandoTexto = msg.texto
+                                            }
+                                        } else null
                                     )
                                 }
                             }
@@ -413,13 +389,6 @@ fun JarvisChatScreen(viewModel: VoxViewModel = viewModel()) {
                         else permLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     }
                 },
-                onCameraClick = {
-                    fotoUri = novaFotoUri()
-                    cameraLauncher.launch(fotoUri!!)
-                },
-                onGalleryClick = {
-                    galeriaLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                },
                 isListening = viewModel.ouvindo
             )
         }
@@ -436,8 +405,6 @@ fun JarvisInputBar(
     onValueChange: (String) -> Unit,
     onSend: () -> Unit,
     onMicClick: () -> Unit,
-    onCameraClick: () -> Unit,
-    onGalleryClick: () -> Unit,
     isListening: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -465,22 +432,6 @@ fun JarvisInputBar(
                 .padding(horizontal = 4.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Camera button
-            IconButton(
-                onClick = onCameraClick,
-                modifier = Modifier.size(38.dp)
-            ) {
-                Text("📷", fontSize = 16.sp)
-            }
-
-            // Gallery button
-            IconButton(
-                onClick = onGalleryClick,
-                modifier = Modifier.size(38.dp)
-            ) {
-                Text("🖼", fontSize = 16.sp)
-            }
-
             // Text field — com envio por Enter
             Box(
                 modifier = Modifier
