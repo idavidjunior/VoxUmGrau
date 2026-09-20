@@ -358,6 +358,16 @@ class VoxWebSocket(
     }
 
     /**
+     * Barge-in: pede à bridge para cancelar a resposta em curso.
+     * Não passa pela fila de reenvio ACK (o cancelamento é efêmero: reenviar
+     * um "cancelar" após reconexão cancelaria uma resposta nova indevidamente).
+     */
+    fun cancelarResposta() {
+        val payload = JSONObject().apply { put("tipo", "cancelar") }.toString()
+        ws?.send(payload)
+    }
+
+    /**
      * Edit-and-resubmit (padrão ChatGPT/Claude): envia a edição de uma mensagem
      * já enviada. A bridge trunca o histórico a partir da mensagem editada e
      * regenera a resposta. Usa a mesma fila de ACK para não perder a edição em

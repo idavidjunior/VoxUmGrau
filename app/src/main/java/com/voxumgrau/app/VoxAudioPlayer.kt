@@ -13,7 +13,10 @@ class VoxAudioPlayer(private val onDone: () -> Unit = {}) {
 
     private var player: MediaPlayer? = null
     private var streaming = false
-    private var streamTempFile: File? = null
+    private var fimStream = false
+    // Fila progressiva de chunks: cada "audio_chunk" da bridge é um MP3
+    // completo e é tocado imediatamente (não mais concatenado e tocado no fim).
+    private val filaChunks = ArrayDeque<File>()
 
     /**
      * Alerta sonoro curto (queda de conexao). Usa ToneGenerator do
@@ -69,65 +72,97 @@ class VoxAudioPlayer(private val onDone: () -> Unit = {}) {
     fun startStream() {
         cancelStream()
         streaming = true
-        streamTempFile = File.createTempFile("vox_stream_", ".mp3")
+        fimStream = false
     }
 
+    /**
+     * Recebe um chunk MP3 completo (streaming por sentença da bridge) e o
+     * enfileira. Se nenhum áudio está tocando, inicia a reprodução na hora.
+     * A reprodução é progressiva: cada sentença começa assim que chega, sem
+     * esperar o fim da resposta.
+     */
     fun playChunk(base64Chunk: String) {
         if (!streaming) {
             Log.w("VoxAudio", "playChunk chamado sem startStream ativo")
             return
         }
-        val tf = streamTempFile ?: return
+        if (base64Chunk.isBlank()) return
         try {
             val audioBytes = Base64.decode(base64Chunk, Base64.DEFAULT)
-            FileOutputStream(tf, true).use { it.write(audioBytes) }
+            if (audioBytes.isEmpty()) return
+            val tf = File.createTempFile("vox_chunk_", ".mp3")
+            FileOutputStream(tf).use { it.write(audioBytes) }
+            filaChunks.addLast(tf)
+            tocarProximo()
         } catch (e: Exception) {
             Log.e("VoxAudio", "playChunk: ${e.message}", e)
         }
     }
 
+    /**
+     * Bridge terminou de enviar chunks (audio_done). Se a fila esvaziar,
+     * dispara onDone. As chamadas de audio_done sem chunks (resposta muito
+     * curta) encerram o ciclo normalmente.
+     */
     fun finishStream() {
         if (!streaming) return
         streaming = false
-        val tf = streamTempFile
-        streamTempFile = null
-        if (tf != null && tf.exists() && tf.length() > 0) {
-            stop()
-            player = MediaPlayer().apply {
-                setDataSource(tf.absolutePath)
-                setOnCompletionListener {
-                    tf.delete()
-                    onDone()
-                }
-                setOnErrorListener { mp, what, extra ->
-                    tf.delete()
-                    Log.e("VoxAudio", "MediaPlayer error: what=$what extra=$extra")
-                    onDone()
-                    true
-                }
-                prepare()
-                start()
-            }
-        } else {
-            tf?.delete()
+        fimStream = true
+        if (player == null) {
             onDone()
         }
     }
 
-    fun cancelStream() {
-        streaming = false
-        streamTempFile?.delete()
-        streamTempFile = null
+    private fun tocarProximo() {
+        if (player != null) return // ainda tocando um chunk
+        val tf = filaChunks.removeFirstOrNull() ?: run {
+            // Fila vazia: se o stream já terminou, o ciclo está completo.
+            if (fimStream && !streaming) onDone()
+            return
+        }
+        player = MediaPlayer().apply {
+            setDataSource(tf.absolutePath)
+            setOnCompletionListener {
+                tf.delete()
+                limparPlayer()
+                tocarProximo()
+            }
+            setOnErrorListener { mp, what, extra ->
+                tf.delete()
+                Log.e("VoxAudio", "MediaPlayer error: what=$what extra=$extra")
+                limparPlayer()
+                tocarProximo()
+                true
+            }
+            prepare()
+            start()
+        }
     }
 
-    fun stop() {
+    private fun limparPlayer() {
         try {
-            player?.stop()
             player?.release()
-        } catch (e: Exception) {
-            Log.e("VoxAudio", "stop: ${e.message}", e)
-        }
+        } catch (_: Exception) {}
         player = null
+    }
+
+    fun cancelStream() {
+        streaming = false
+        fimStream = false
+        stop()
+        filaChunks.forEach { it.delete() }
+        filaChunks.clear()
+    }
+
+    /**
+     * Para a reprodução imediatamente e limpa a fila (barge-in: usuário
+     * interrompeu a fala). Não dispara onDone — quem cancelou já sabe que o
+     * ciclo acabou.
+     */
+    fun stop() {
+        limparPlayer()
+        filaChunks.forEach { it.delete() }
+        filaChunks.clear()
     }
 
     fun shutdown() {

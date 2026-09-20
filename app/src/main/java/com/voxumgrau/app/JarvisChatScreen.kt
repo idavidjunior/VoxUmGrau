@@ -3,8 +3,13 @@ package com.voxumgrau.app
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
+import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -29,13 +34,18 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.voxumgrau.app.ui.components.*
@@ -71,6 +81,9 @@ fun JarvisChatScreen(viewModel: VoxViewModel = viewModel()) {
     // Quando não-nulo, a mensagem naquele índice é exibida em modo de edição.
     var editandoIndice by remember { mutableStateOf<Int?>(null) }
     var editandoTexto by remember { mutableStateOf("") }
+
+    // Imagem aberta em tela cheia (toque na imagem no balão)
+    var imagemTelaCheia by remember { mutableStateOf<ByteArray?>(null) }
 
     fun cancelarEdicao() {
         editandoIndice = null
@@ -131,6 +144,13 @@ fun JarvisChatScreen(viewModel: VoxViewModel = viewModel()) {
     LaunchedEffect(viewModel.mensagens.size) {
         if (viewModel.mensagens.isNotEmpty()) {
             listState.animateScrollToItem(viewModel.mensagens.size - 1)
+        }
+    }
+
+    // Auto-scroll durante a transcrição parcial (a bolha cresce em tempo real)
+    LaunchedEffect(viewModel.transcricaoParcial) {
+        if (viewModel.ouvindo && viewModel.transcricaoParcial.isNotEmpty()) {
+            listState.animateScrollToItem((viewModel.mensagens).size)
         }
     }
 
@@ -312,6 +332,7 @@ fun JarvisChatScreen(viewModel: VoxViewModel = viewModel()) {
                                         isAudio = msg.isAudio && !msg.deUsuario,
                                         imagem = msg.imagem,
                                         legenda = msg.legenda,
+                                        onImagemClick = { binario -> imagemTelaCheia = binario },
                                         acaoEdicao = if (msg.deUsuario && editandoIndice == null && !viewModel.processando) {
                                             {
                                                 editandoIndice = indice
@@ -320,6 +341,19 @@ fun JarvisChatScreen(viewModel: VoxViewModel = viewModel()) {
                                         } else null
                                     )
                                 }
+                            }
+                        }
+
+                        // Voz ao vivo (turn-taking): mostra a transcrição parcial
+                        // enquanto o usuário fala. O turno só é enviado no final.
+                        if (viewModel.ouvindo && viewModel.transcricaoParcial.isNotEmpty()) {
+                            item {
+                                JarvisMessageBubble(
+                                    text = viewModel.transcricaoParcial,
+                                    isUser = true,
+                                    timestamp = "",
+                                    isAudio = true
+                                )
                             }
                         }
 
@@ -352,6 +386,27 @@ fun JarvisChatScreen(viewModel: VoxViewModel = viewModel()) {
                             barCount = 3,
                             color = if (voiceState == VoiceState.IDLE) JarvisCyan.copy(alpha = 0.3f) else JarvisCyan
                         )
+                    }
+
+                    // Botão de interromper a fala (barge-in manual): para o áudio
+                    // e avisa a bridge via {"tipo":"cancelar"}.
+                    if (viewModel.audioStreaming) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .padding(start = 8.dp, bottom = 80.dp)
+                                .clip(RoundedCornerShape(28.dp))
+                                .background(JarvisRed.copy(alpha = 0.9f))
+                                .clickable { viewModel.interromperResposta() }
+                                .padding(horizontal = 14.dp, vertical = 10.dp)
+                        ) {
+                            Text(
+                                text = "Interromper",
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp
+                            )
+                        }
                     }
                 }
 
@@ -392,6 +447,124 @@ fun JarvisChatScreen(viewModel: VoxViewModel = viewModel()) {
                 isListening = viewModel.ouvindo
             )
         }
+    }
+
+    // Tela cheia da imagem — toque na imagem do balão abre aqui
+    imagemTelaCheia?.let { binario ->
+        ImagemTelaCheiaDialog(
+            binario = binario,
+            onClose = { imagemTelaCheia = null },
+            onSalvar = {
+                salvarImagemNaGaleria(ctx, binario)
+            }
+        )
+    }
+}
+
+// ============================================================
+// IMAGEM EM TELA CHEIA — toque na imagem abre aqui, com salvar na galeria
+// ============================================================
+
+@Composable
+fun ImagemTelaCheiaDialog(
+    binario: ByteArray,
+    onClose: () -> Unit,
+    onSalvar: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val bitmap = remember(binario) {
+        BitmapFactory.decodeByteArray(binario, 0, binario.size)
+    }
+
+    Dialog(
+        onDismissRequest = onClose,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(Color.Black)
+        ) {
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = "Imagem ampliada",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 48.dp),
+                    contentScale = ContentScale.Fit
+                )
+            }
+
+            // Fechar
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(12.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(JarvisSurfaceGlass)
+            ) {
+                Text("✕", color = JarvisTextPrimary, fontSize = 18.sp)
+            }
+
+            // Salvar na galeria
+            IconButton(
+                onClick = { onSalvar(); onClose() },
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(12.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(JarvisCyan.copy(alpha = 0.25f))
+            ) {
+                Text("⇩", color = JarvisCyan, fontSize = 18.sp)
+            }
+        }
+    }
+}
+
+fun salvarImagemNaGaleria(context: Context, binario: ByteArray): Boolean {
+    return try {
+        val nomeArquivo = "jarvis_diagrama_${System.currentTimeMillis()}.png"
+        val resolver = context.contentResolver
+
+        val valores = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, nomeArquivo)
+            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(
+                    MediaStore.Images.Media.RELATIVE_PATH,
+                    "${android.os.Environment.DIRECTORY_PICTURES}/Jarvis"
+                )
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+        }
+
+        var uri: Uri? = null
+        var saida: java.io.OutputStream? = null
+        try {
+            uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, valores)
+            if (uri != null) {
+                saida = resolver.openOutputStream(uri)
+                saida?.write(binario)
+                saida?.flush()
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    valores.clear()
+                    valores.put(MediaStore.Images.Media.IS_PENDING, 0)
+                    resolver.update(uri, valores, null, null)
+                }
+                Toast.makeText(context, "Imagem salva na galeria", Toast.LENGTH_SHORT).show()
+                true
+            } else {
+                Toast.makeText(context, "Falha ao salvar imagem", Toast.LENGTH_SHORT).show()
+                false
+            }
+        } finally {
+            saida?.close()
+        }
+    } catch (e: Exception) {
+        Toast.makeText(context, "Não foi possível salvar: ${e.message}", Toast.LENGTH_LONG).show()
+        false
     }
 }
 

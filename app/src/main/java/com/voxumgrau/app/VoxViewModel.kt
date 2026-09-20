@@ -25,6 +25,7 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
     var conectado by mutableStateOf(false)
     var ultimaFala by mutableStateOf("")
     var ouvindo by mutableStateOf(false)
+    var transcricaoParcial by mutableStateOf("")
     var microfonePermitido by mutableStateOf(false)
     var mensagens by mutableStateOf(listOf<Mensagem>())
     var textoInput by mutableStateOf("")
@@ -152,12 +153,21 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
     private val onSttResult: (String) -> Unit = { raw ->
         viewModelScope.launch(Dispatchers.Main) {
             val text = VoxPontuacao.pontuar(raw)
+            transcricaoParcial = ""
             ouvindo = false
+            // Barge-in: se o usuário fechou um turno durante a fala do Jarvis,
+            // cancela a resposta em curso antes de enviar o novo pedido. A
+            // bridge cancela a task atual e processa a nova mensagem em seguida.
+            if (audioStreaming || processando) {
+                audioStreaming = false
+                audioPlayer?.stop()
+                ws?.cancelarResposta()
+            }
             mensagens = mensagens + Mensagem(text, true)
-            ws?.setAguardandoResposta(true)
-            ws?.send(text)
             processando = true
             progressoEtapa = "Enviando sua mensagem"
+            ws?.setAguardandoResposta(true)
+            ws?.send(text)
             // Modo Eco ativo: volta a ouvir automaticamente apÃ³s processar
             if (ecoAtivo && conectado && microfonePermitido) {
                 // pequeno delay na main thread (SpeechRecognizer exige main thread)
@@ -169,6 +179,11 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
+    }
+
+    private val onSttPartial: (String) -> Unit = { raw ->
+        // Parcial exibido ao vivo enquanto o usuário fala. NUNCA envia turno.
+        if (ouvindo && raw.isNotEmpty()) transcricaoParcial = raw
     }
 
     private val onMessage: (String) -> Unit = { raw ->
@@ -230,6 +245,18 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
                     progressoEtapa = ""
                     ws?.setAguardandoResposta(false)
                     status = "Não encontrei essa mensagem para editar"
+                    return@launch
+                }
+                if (json.optString("tipo") == "cancelado") {
+                    // Bridge interrompeu a fala (barge-in do usuário): encerra
+                    // o streaming, limpa o estado e volta a ouvir se Eco ativo.
+                    audioStreaming = false
+                    audioPlayer?.stop()
+                    processando = false
+                    progressoEtapa = ""
+                    ws?.setAguardandoResposta(false)
+                    status = json.optString("text", "Interrompido")
+                    if (ecoAtivo && conectado && microfonePermitido && !ouvindo) comecarOuvir()
                     return@launch
                 }
                 if (json.has("progresso")) {
@@ -381,13 +408,33 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
         if (ouvindo) return
         stt?.destroy()
         ouvindo = true
-        stt = VoxStt(onSttResult, onSttError)
+        transcricaoParcial = ""
+        stt = VoxStt(onSttResult, onSttError, onSttPartial)
         stt?.start(getApplication())
     }
 
     fun pararOuvir() {
         stt?.stop()
         ouvindo = false
+        transcricaoParcial = ""
+    }
+
+    /**
+     * Barge-in (Movimento 3): o usuário interrompe a resposta falando.
+     * Para a reprodução de áudio, avisa a bridge via {"tipo":"cancelar"} e
+     * volta a escutar imediatamente. A bridge cancela a task de resposta e
+     * responde {"tipo":"cancelado"}.
+     */
+    fun interromperResposta() {
+        viewModelScope.launch(Dispatchers.Main) {
+            audioStreaming = false
+            audioPlayer?.stop()
+            processando = false
+            progressoEtapa = ""
+            ws?.setAguardandoResposta(false)
+            ws?.cancelarResposta()
+            if (ecoAtivo && conectado && microfonePermitido && !ouvindo) comecarOuvir()
+        }
     }
 
     override fun onCleared() {

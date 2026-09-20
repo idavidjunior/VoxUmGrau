@@ -41,6 +41,7 @@ fun JarvisMessageBubble(
     isAudio: Boolean = false,
     imagem: ByteArray? = null,
     legenda: String? = null,
+    onImagemClick: ((ByteArray) -> Unit)? = null,
     acaoEdicao: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -98,7 +99,12 @@ fun JarvisMessageBubble(
                                 .fillMaxWidth()
                                 .widthIn(max = 280.dp)
                                 .aspectRatio(16f / 9f)
-                                .clip(RoundedCornerShape(10.dp)),
+                                .clip(RoundedCornerShape(10.dp))
+                                .then(
+                                    if (onImagemClick != null)
+                                        Modifier.clickable { onImagemClick(imagem!!) }
+                                    else Modifier
+                                ),
                             contentScale = ContentScale.Fit
                         )
                         if (text.isNotEmpty()) {
