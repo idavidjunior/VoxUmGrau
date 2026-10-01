@@ -44,10 +44,25 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
     var redeAtual by mutableStateOf("")
         private set
 
+    var terminalLinhas by mutableStateOf(listOf<String>())
+        private set
+    var terminalAberto by mutableStateOf(false)
+        private set
+    var logsAtivo by mutableStateOf(false)
+        private set
+
+    /** True quando o usuário fechou o terminal manualmente (impede auto-abrir). */
+    private var terminalFechadoPeloUsuario = false
+
     private var stt: VoxStt? = null
     private var ws: VoxWebSocket? = null
+    private var logSocket: VoxLogSocket? = null
     private var audioPlayer: VoxAudioPlayer? = null
     private var redeMonitor: RedeMonitor? = null
+
+    companion object {
+        private const val MAX_LINHAS_TERMINAL = 200
+    }
 
     var audioStreaming by mutableStateOf(false)
         private set
@@ -190,6 +205,20 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.Main) {
             try {
                 val json = JSONObject(raw)
+                // Linhas de trabalho do agente (canal ">_"), traduzidas pela
+                // bridge: mostram o trabalho real em tempo real (pensar,
+                // buscar, verificar), não log cru. Auto-abre o terminal na
+                // primeira linha, exceto se o usuário fechou manualmente.
+                if (json.optString("tipo") == "trabalho") {
+                    val linha = json.optString("linha")
+                    if (linha.isNotEmpty()) {
+                        terminalLinhas = (terminalLinhas + linha).takeLast(MAX_LINHAS_TERMINAL)
+                        if (!terminalAberto && !terminalFechadoPeloUsuario) {
+                            terminalAberto = true
+                        }
+                    }
+                    return@launch
+                }
                 // Histórico ÚNICO (app = voz do ecossistema): a bridge envia a
                 // conversa canônica do ecossistema na conexão. O app não mantém
                 // histórico próprio — apenas renderiza o que o ecossistema tem.
@@ -359,6 +388,18 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
         saude = VoxHealthInfo()
         ws = VoxWebSocket(onMessage, onStatus, onHealth)
         ws?.connect(host, port)
+
+        // Terminal de trabalho (">_"): a bridge envia frames {"tipo":"trabalho"}
+        // com o agente trabalhando em tempo real (linhas pt-BR amigáveis). O
+        // canal /logs cru foi descontinuado como fonte do terminal.
+        terminalLinhas = listOf()
+        logsAtivo = false
+        terminalFechadoPeloUsuario = false
+    }
+
+    fun alternarTerminal() {
+        terminalAberto = !terminalAberto
+        if (!terminalAberto) terminalFechadoPeloUsuario = true
     }
 
     fun send(text: String) {

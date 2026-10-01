@@ -253,6 +253,16 @@ fun JarvisChatScreen(viewModel: VoxViewModel = viewModel()) {
                 }
             }
 
+            // Terminal de trabalho do ecossistema (canal ">_": a bridge envia
+            // frames {"tipo":"trabalho"} com o agente trabalhando em tempo real)
+            JarvisTerminalWindow(
+                linhas = viewModel.terminalLinhas,
+                aberto = viewModel.terminalAberto,
+                logsAtivo = viewModel.conectado,
+                onToggle = { viewModel.alternarTerminal() },
+                modifier = Modifier.padding(horizontal = 12.dp)
+            )
+
             // Área central — Chat + Visualizador
             Box(
                 modifier = Modifier
