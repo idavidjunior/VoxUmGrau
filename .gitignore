@@ -4,6 +4,7 @@ build/
 .gradle/
 local.properties
 build_*.txt
+build_*.log
 
 # IDE
 .idea/
