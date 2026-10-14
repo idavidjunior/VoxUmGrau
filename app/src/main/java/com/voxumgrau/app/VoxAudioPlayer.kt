@@ -51,11 +51,13 @@ class VoxAudioPlayer(private val onDone: () -> Unit = {}) {
                 setDataSource(tempFile!!.absolutePath)
                 setOnCompletionListener {
                     tempFile?.delete()
+                    limparPlayer()
                     onDone()
                 }
                 setOnErrorListener { mp, what, extra ->
                     tempFile?.delete()
                     Log.e("VoxAudio", "MediaPlayer error: what=$what extra=$extra")
+                    limparPlayer()
                     onDone()
                     true
                 }

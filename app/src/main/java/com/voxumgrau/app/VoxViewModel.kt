@@ -59,6 +59,7 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
     private var logSocket: VoxLogSocket? = null
     private var audioPlayer: VoxAudioPlayer? = null
     private var redeMonitor: RedeMonitor? = null
+    private var ultimoErroAudio: String? = null
 
     companion object {
         private const val MAX_LINHAS_TERMINAL = 200
@@ -72,7 +73,12 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
         val prefsHost = getApplication<Application>().getSharedPreferences("vox_prefs", android.content.Context.MODE_PRIVATE)
         hostIp = prefsHost.getString("host_ip", "100.91.141.101") ?: "100.91.141.101"
         audioPlayer = VoxAudioPlayer(onDone = {
-            if (!ouvindo) status = "Pronto para falar"
+            audioStreaming = false
+            status = ultimoErroAudio ?: if (!ouvindo) "Pronto para falar" else status
+            ultimoErroAudio = null
+            if (ecoAtivo && conectado && microfonePermitido && !ouvindo && !processando) {
+                comecarOuvir()
+            }
         })
         // Restaura o estado "Eco" persistido entre sessions
         val prefs = getApplication<Application>().getSharedPreferences("vox_prefs", android.content.Context.MODE_PRIVATE)
@@ -316,17 +322,13 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
                     if (ouvindo) pararOuvir()
                     audioStreaming = true
                     audioPlayer?.startStream()
-                    if (ecoAtivo && conectado && microfonePermitido) {
-                        viewModelScope.launch(Dispatchers.Main) {
-                            delay(1200)
-                            if (ecoAtivo && !ouvindo) comecarOuvir()
-                        }
-                    }
                 } else if (json.has("audio_chunk")) {
                     val chunk = json.getString("audio_chunk")
                     audioPlayer?.playChunk(chunk)
+                } else if (json.has("audio_error")) {
+                    ultimoErroAudio = json.getString("audio_error")
+                    status = ultimoErroAudio ?: "Falha no áudio"
                 } else if (json.has("audio_done")) {
-                    audioStreaming = false
                     audioPlayer?.finishStream()
                 } else if (json.has("audio")) {
                     val audioB64 = json.getString("audio")
@@ -339,13 +341,8 @@ class VoxViewModel(app: Application) : AndroidViewModel(app) {
                     ws?.setAguardandoResposta(false)
 
                     if (ouvindo) pararOuvir()
+                    audioStreaming = true
                     audioPlayer?.play(audioB64)
-                    if (ecoAtivo && conectado && microfonePermitido) {
-                        viewModelScope.launch(Dispatchers.Main) {
-                            delay(1200)
-                            if (ecoAtivo && !ouvindo) comecarOuvir()
-                        }
-                    }
                 } else if (json.has("text")) {
                     val text = json.getString("text")
                     mensagens = mensagens + Mensagem(text, false)
